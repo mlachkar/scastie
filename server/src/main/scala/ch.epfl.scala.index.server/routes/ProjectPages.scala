@@ -94,6 +94,8 @@ class ProjectPages(
       repo: String,
       userState: Option[UserState]
   ) = {
+    type ArtifactName = String
+    type ScalaVersion = String
 
     val user = userState.map(_.info)
 
@@ -110,41 +112,54 @@ class ProjectPages(
       .getProjectAndReleases(Project.Reference(owner, repo))
       .map {
         case Some((project, releases)) =>
-          val targets =
+          val targetTypesWithScalaVersion
+              : Map[ScalaTargetType, Seq[ScalaVersion]] =
             releases
-              .map(_.reference.target)
-              .sorted
-              .reverse
-              .map(target =>
+              .groupBy(_.reference.target.map(_.targetType).getOrElse(Java))
+              .map { case (targetType, releases) =>
                 (
-                  target,
-                  target.map(showVersion).getOrElse("Java")
+                  targetType,
+                  releases.map(
+                    _.reference.target.map(showVersion).getOrElse("Java")
+                  )
                 )
-              )
-              .distinct
+              }
 
-          val targetTypes =
-            targets
-              .map(
-                _._1
-                  .map(_.targetType)
-                  .getOrElse(Java)
-              )
-              .groupBy(x => x)
-              .map { case (k, vs) => (k, vs.size) }
-              .toList
-
-          val sortedReleases =
+          val artifactsWithVersions: Map[SemanticVersion, Map[ArtifactName, Seq[
+            (Release, ScalaVersion)
+          ]]] =
             releases
               .groupBy(_.reference.version)
-              .toList
-              .sortBy(_._1)
-              .reverse
+              .map { case (semanticVersion, releases) =>
+                (
+                  semanticVersion,
+                  releases
+                    .groupBy(_.reference.artifact)
+                    .map { case (artifactName, releases) =>
+                      (
+                        artifactName,
+                        releases.map(r =>
+                          (
+                            r,
+                            r.reference.target
+                              .map(showVersion)
+                              .getOrElse("Java")
+                          )
+                        )
+                      )
+                    }
+                )
+              }
 
           (
             OK,
             views.html
-              .artifacts(project, sortedReleases, targetTypes, targets, user)
+              .artifacts(
+                project,
+                user,
+                targetTypesWithScalaVersion,
+                artifactsWithVersions
+              )
           )
         case None => (NotFound, views.html.notfound(user))
       }
